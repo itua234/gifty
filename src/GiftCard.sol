@@ -49,6 +49,7 @@ contract GiftCard {
     error InvalidReceiver(address receiver);
     error ZeroValueNotAllowed();
     error CardNotExpired(uint256 expireAt);
+    error TransferFailed();
 
     struct Card {
         uint256 cardId;
@@ -64,6 +65,8 @@ contract GiftCard {
     AggregatorV3Interface private s_priceFeed;
     mapping(uint256 => Card) public giftCards;
     uint256 private nextCardId;
+
+    enum ClaimType { Token, Bank, Airtime, Data }
 
     event GiftCardCreated(
         uint256 indexed cardId,
@@ -180,6 +183,17 @@ contract GiftCard {
         card.value = 0;
         card.claimed = true; // Mark as claimed to prevent double spending
 
-        payable(msg.sender).transfer(amount);
+        (
+            bool callSuccess,
+            //bytes memory dataReturned
+        ) = payable(msg.sender).call{value: amount}("");
+        if(!callSuccess) revert TransferFailed();
+
+        emit GiftCardClaimed(
+            _cardId,
+            msg.sender,
+            amount,
+            block.timestamp
+        );
     }
 }
