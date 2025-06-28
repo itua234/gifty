@@ -98,12 +98,12 @@ contract GiftCard {
         _;
     }
 
-    function createGiftCard(uint256 _expireAt) public payable {
+    function createGiftCard(uint256 _expireAt, string memory pin) public payable {
         if(msg.value == 0) revert ZeroValueNotAllowed();
         if(msg.sender == address(0)) revert NotAuthorized(msg.sender);
 
         uint256 cardId = nextCardId;
-        bytes32 pinHash = keccak256(abi.encodePacked(block.timestamp, msg.sender, cardId));
+        bytes32 pinHash = keccak256(abi.encodePacked(pin));
 
         giftCards[cardId] = Card({
             cardId: cardId,
@@ -174,20 +174,18 @@ contract GiftCard {
 
         if(card.cardId == 0) revert GiftCardNotFound(_cardId);
         if (card.claimed) revert AlreadyClaimedOrRefunded(_cardId);
-        //if(block.timestamp < card.createdAt) revert CardLocked(card.createdAt);
         if (block.timestamp < card.expireAt) revert CardNotExpired(card.expireAt);
         if (card.value == 0) revert AlreadyClaimedOrRefunded(_cardId);
 
-        // Check PIN
         if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
 
-        // Calculate 0.05% fee (5 basis points)
         uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
         uint256 payout = card.value - fee;
 
         card.claimed = true; // Mark as claimed to prevent double spending
         card.receiver = payable(msg.sender);
         card.value = 0;
+        s_totalFeesCollected += fee;
 
         if (address(this).balance < 0) revert TransferFailed();
         // Transfer payout to receiver
@@ -198,7 +196,6 @@ contract GiftCard {
         (bool feeSent, ) = s_feeCollector.call{value: fee}("");
         if(!feeSent) revert TransferFailed();
 
-        s_totalFeesCollected += fee;
         emit FeeCollected(s_feeCollector, fee);
         emit GiftCardClaimed(
             _cardId,
@@ -230,12 +227,11 @@ contract GiftCard {
         card.claimed = true;
         card.receiver = payable(msg.sender);
         card.value = 0;
+        s_totalFeesCollected += fee;
 
         // Collect fee
         (bool feeSent, ) = s_feeCollector.call{value: fee}("");
         if (!feeSent) revert TransferFailed(); // Revert if fee transfer fails
-
-        s_totalFeesCollected += fee;
 
         // The off-chain service will then convert USD to NGN and top up airtime
         uint256 usdEquivalent = amountToProcess.getUsdAmountFromEth(s_priceFeed);
@@ -278,12 +274,11 @@ contract GiftCard {
         card.claimed = true;
         card.receiver = payable(msg.sender);
         card.value = 0;
+        s_totalFeesCollected += fee;
 
         // Collect fee
         (bool feeSent, ) = s_feeCollector.call{value: fee}("");
         if (!feeSent) revert TransferFailed(); // Revert if fee transfer fails
-
-        s_totalFeesCollected += fee;
 
         // The off-chain service will then convert USD to NGN and top up airtime
         uint256 usdEquivalent = amountToProcess.getUsdAmountFromEth(s_priceFeed);
