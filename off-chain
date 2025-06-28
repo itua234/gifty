@@ -1,0 +1,115 @@
+# This is pseudocode for an off-chain Python service
+from web3 import Web3
+import requests # For API calls
+import json
+
+# --- Configuration (replace with your actual values) ---
+WEB3_PROVIDER_URL = "YOUR_ETHEREUM_NODE_URL" # e.g., Infura, Alchemy
+CONTRACT_ADDRESS = "YOUR_GIFTCARD_CONTRACT_ADDRESS"
+CONTRACT_ABI = json.loads("YOUR_GIFTCARD_CONTRACT_ABI") # ABI of your GiftCard contract
+AIRTIME_API_URL = "YOUR_AIRTIME_PROVIDER_API_URL" # e.g., VTU.ng, Paystack, Flutterwave airtime APIs
+AIRTIME_API_KEY = "YOUR_AIRTIME_PROVIDER_API_KEY"
+FEE_COLLECTOR_PRIVATE_KEY = "YOUR_FEE_COLLECTOR_WALLET_PRIVATE_KEY" # Wallet to fund off-chain calls (if needed)
+
+# --- Initialize Web3 ---
+w3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
+contract = w3.eth.contract(address=CONTRACT_ADDRESS, abi=CONTRACT_ABI)
+
+# --- Function to process airtime claim ---
+def process_airtime_claim(event_data):
+    card_id = event_data['args']['cardId']
+    claimer = event_data['args']['claimer']
+    phone_number = event_data['args']['phoneNumber']
+    usd_amount = event_data['args']['usdAmount']
+    eth_amount = event_data['args']['ethAmount']
+
+    print(f"Processing airtime claim for Card ID: {card_id}")
+    print(f"Claimer: {claimer}, Phone: {phone_number}, USD Amount: {usd_amount / (10**18)} USD, ETH Amount: {eth_amount / (10**18)} ETH") # Assuming 18 decimals for USD and ETH
+
+    try:
+        # 1. Get current NGN/USD exchange rate (if airtime API expects NGN)
+        # You'd ideally use a more reliable source than a direct hardcode, e.g., a forex API
+        # For simplicity, let's assume a fixed rate or fetch from a reliable source.
+        # Example: 1 USD = 1500 NGN (as of early 2025)
+        # In a real scenario, this would be fetched from an oracle or reliable forex API.
+        ngn_per_usd = 1500 # This needs to be dynamically updated and reliable!
+        ngn_amount = (usd_amount * ngn_per_usd) / (10**18) # Adjust for decimals if needed
+
+        print(f"Calculated NGN amount for airtime: {ngn_amount} NGN")
+
+        # 2. Call the off-chain airtime top-up API
+        headers = {
+            "Authorization": f"Bearer {AIRTIME_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "phone_number": phone_number,
+            "amount": int(ngn_amount), # Airtime APIs usually expect integer NGN amount
+            "network_code": "MTN", # Or dynamic based on phone number prefix
+            "reference": f"giftcard-{card_id}-{w3.eth.hash_of(f'{card_id}{claimer}{phone_number}{w3.eth.timestamp}')}" # Unique reference
+        }
+
+        response = requests.post(AIRTIME_API_URL, headers=headers, json=payload)
+        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+
+        response_data = response.json()
+        print(f"Airtime API response: {response_data}")
+
+        if response_data.get("status") == "success": # Check your API's success indicator
+            print(f"Successfully topped up {ngn_amount} NGN to {phone_number} for card {card_id}")
+            # Optionally, you could send a transaction back to the contract
+            # to record the success of the off-chain top-up, but that adds complexity.
+            # Usually, just logging/database updates off-chain are sufficient.
+        else:
+            print(f"Failed to top up airtime for card {card_id}. API error: {response_data}")
+            # Handle failure: notify admin, log, potentially manual refund from contract if off-chain service can't fulfill
+            # This is where having a "dispute resolution" mechanism or manual intervention might be needed.
+
+    except requests.exceptions.RequestException as e:
+        print(f"API call failed: {e}")
+        # Handle network errors, API downtime etc.
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+# --- Main Listener Loop ---
+def listen_for_airtime_claims():
+    event_filter = contract.events.AirtimeClaimRequested.create_filter(fromBlock='latest')
+    print("Listening for AirtimeClaimRequested events...")
+    while True:
+        for event in event_filter.get_new_entries():
+            process_airtime_claim(event)
+        # Add a delay to avoid hammering the node
+        w3.eth.wait_for_transaction_receipt(event.transactionHash, timeout=120) # Wait for event to be mined
+        time.sleep(10) # Poll every 10 seconds
+
+if __name__ == "__main__":
+    # For a production system, use a more robust event listener,
+    # and ensure security for API keys and private keys.
+    # Also consider idempotency (preventing double top-ups for the same event).
+    listen_for_airtime_claims()
+
+Security and Design Considerations:
+
+Trust: The off-chain service is a trusted component. It must be secure and reliable. If it fails or is compromised, airtime claims might not be processed correctly.
+
+Atomicity Break: The on-chain action (deducting ETH, emitting event) and the off-chain action (airtime top-up) are not atomic. If the off-chain service fails after the event is emitted, the user's ETH is gone from the card, but they haven't received airtime. You need a robust system to handle these failures (e.g., manual refunds, retry mechanisms, monitoring).
+
+Exchange Rate Volatility: ETH/USD and USD/NGN exchange rates can fluctuate rapidly.
+
+The usdEquivalent in your event provides a value in USD at the time the transaction was processed on-chain.
+
+The off-chain service then converts this USD to NGN.
+
+You need to decide if the contract should guarantee a specific NGN amount, or if the user accepts the NGN equivalent based on the current rates at the time of off-chain processing. The latter is more common.
+
+Gas Costs: The claimGiftCardAirtime function will consume gas.
+
+Off-Chain Service Costs: The off-chain service will need funds to pay for the airtime top-ups. These funds could come from the s_feeCollector's wallet, or it could be a separate operational budget for the service provider. The ETH collected from the gift card value in the contract essentially reimburses (or funds) this off-chain operation.
+
+Error Handling & Monitoring: Robust logging, error alerting, and a monitoring system for both on-chain events and off-chain service performance are critical.
+
+Privacy: Phone numbers are sensitive. Ensure the off-chain service handles this data securely and in compliance with privacy regulations.
+
+Scalability: For a high volume of claims, your off-chain service needs to be scalable.
+
+This hybrid approach is the standard way to bridge blockchain interactions with real-world services.

@@ -63,7 +63,8 @@ contract GiftCard {
         address indexed claimer,
         string bankAccount,
         string bankCode,
-        uint256 amount,
+        uint256 usdAmount,
+        uint256 ethAmount,
         uint256 timestamp
     );
     event AirtimeClaimRequested(
@@ -198,10 +199,108 @@ contract GiftCard {
         if(!feeSent) revert TransferFailed();
 
         s_totalFeesCollected += fee;
+        emit FeeCollected(s_feeCollector, fee);
         emit GiftCardClaimed(
             _cardId,
             msg.sender,
             payout,
+            block.timestamp
+        );
+    }
+
+    function claimGiftCardAirtime(
+        uint256 _cardId,
+        string memory pin,
+        string memory _phoneNumber // E.g., "+2348012345678"
+    ) public {
+        Card storage card = giftCards[_cardId];
+      
+        if (card.cardId == 0) revert GiftCardNotFound(_cardId);
+        if (card.claimed) revert AlreadyClaimedOrRefunded(_cardId);
+        if (card.value == 0) revert AlreadyClaimedOrRefunded(_cardId); // Already refunded/claimed
+
+        if (card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
+
+        // Basic phone number validation (can be more robust off-chain)
+        if (bytes(_phoneNumber).length < 7) revert InvalidPhoneNumber();
+
+        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 amountToProcess = card.value - fee; // This is the ETH amount to be converted to NGN airtime
+
+        card.claimed = true;
+        card.receiver = payable(msg.sender);
+        card.value = 0;
+
+        // Collect fee
+        (bool feeSent, ) = s_feeCollector.call{value: fee}("");
+        if (!feeSent) revert TransferFailed(); // Revert if fee transfer fails
+
+        s_totalFeesCollected += fee;
+
+        // The off-chain service will then convert USD to NGN and top up airtime
+        uint256 usdEquivalent = amountToProcess.getUsdAmountFromEth(s_priceFeed);
+
+        emit AirtimeClaimRequested(
+            _cardId,
+            msg.sender,
+            _phoneNumber,
+            usdEquivalent,
+            amountToProcess, 
+            block.timestamp
+        );
+        emit GiftCardClaimed(
+            _cardId,
+            msg.sender,
+            amountToProcess,
+            block.timestamp
+        );
+        emit FeeCollected(s_feeCollector, fee);
+    }
+
+    function claimGiftCardToBank(
+        uint256 _cardId,
+        string memory pin,
+        string memory bankAccount,
+        string memory bankCode
+    ) external {
+        Card storage card = giftCards[_cardId];
+
+        if(card.cardId == 0) revert GiftCardNotFound(_cardId);
+        if(card.claimed) revert AlreadyClaimedOrRefunded(_cardId);
+        if(card.value == 0) revert AlreadyClaimedOrRefunded(_cardId);
+
+        if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
+
+        // Calculate fee
+        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 amountToProcess = card.value - fee;
+
+        card.claimed = true;
+        card.receiver = payable(msg.sender);
+        card.value = 0;
+
+        // Collect fee
+        (bool feeSent, ) = s_feeCollector.call{value: fee}("");
+        if (!feeSent) revert TransferFailed(); // Revert if fee transfer fails
+
+        s_totalFeesCollected += fee;
+
+        // The off-chain service will then convert USD to NGN and top up airtime
+        uint256 usdEquivalent = amountToProcess.getUsdAmountFromEth(s_priceFeed);
+
+        emit BankClaimRequested(
+            _cardId,
+            msg.sender,
+            bankAccount,
+            bankCode,
+            usdEquivalent,
+            amountToProcess, 
+            block.timestamp
+        );
+        emit GiftCardClaimed(
+            _cardId,
+            msg.sender,
+            amountToProcess,
             block.timestamp
         );
         emit FeeCollected(s_feeCollector, fee);
