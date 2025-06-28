@@ -40,7 +40,7 @@ contract GiftCard {
     uint256 private nextCardId;
 
     uint256 private s_totalFeesCollected; // Total fees collected from gift card transactions
-    uint256 private s_claimFeeBasisPoints; // e.g., 2 for 0.02%
+    uint256 private s_claimFee; // e.g., 2 for 0.02%
     address payable private s_feeCollector; // Address to send the fee to
 
     enum ClaimType { Token, Bank, Airtime, Data }
@@ -81,7 +81,7 @@ contract GiftCard {
         nextCardId = 1;
         s_priceFeed = AggregatorV3Interface(priceFeed);
         s_feeCollector = payable(msg.sender);
-        s_claimFeeBasisPoints = 5;
+        s_claimFee = 5;
     }
 
     modifier onlyOwner() {
@@ -179,7 +179,7 @@ contract GiftCard {
 
         if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
 
-        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 fee = (card.value * s_claimFee) / 10000;
         uint256 payout = card.value - fee;
 
         card.claimed = true; // Mark as claimed to prevent double spending
@@ -187,7 +187,6 @@ contract GiftCard {
         card.value = 0;
         s_totalFeesCollected += fee;
 
-        if (address(this).balance < 0) revert TransferFailed();
         // Transfer payout to receiver
         (bool sent, ) = payable(msg.sender).call{value: payout}("");
         if (!sent) revert TransferFailed();
@@ -221,7 +220,7 @@ contract GiftCard {
         // Basic phone number validation (can be more robust off-chain)
         if (bytes(_phoneNumber).length < 7) revert InvalidPhoneNumber();
 
-        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 fee = (card.value * s_claimFee) / 10000;
         uint256 amountToProcess = card.value - fee; // This is the ETH amount to be converted to NGN airtime
 
         card.claimed = true;
@@ -268,7 +267,7 @@ contract GiftCard {
         if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
 
         // Calculate fee
-        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 fee = (card.value * s_claimFee) / 10000;
         uint256 amountToProcess = card.value - fee;
 
         card.claimed = true;
@@ -315,5 +314,11 @@ contract GiftCard {
 
     function getTotalFeesCollected() external view onlyOwner returns (uint256) {
         return s_totalFeesCollected;
+    }
+
+    function setFixedFee(
+        uint256 _newFee
+    ) private onlyOwner {
+        s_claimFee = _newFee;
     }
 }
