@@ -22,6 +22,7 @@ contract GiftCard {
     error ZeroValueNotAllowed();
     error CardNotExpired(uint256 expireAt);
     error TransferFailed();
+    error InvalidPhoneNumber();
 
     struct Card {
         uint256 cardId;
@@ -56,6 +57,22 @@ contract GiftCard {
         address indexed receiver,
         uint256 value,
         uint256 createdAt
+    );
+    event BankClaimRequested(
+        uint256 indexed cardId,
+        address indexed claimer,
+        string bankAccount,
+        string bankCode,
+        uint256 amount,
+        uint256 timestamp
+    );
+    event AirtimeClaimRequested(
+        uint256 indexed cardId,
+        address indexed claimer,
+        string phoneNumber, // E.g., "+2348012345678"
+        uint256 usdAmount,   // Amount in USD after conversion, for the off-chain service
+        uint256 ethAmount,   // Original ETH amount for reference
+        uint256 timestamp
     );
     event FeeCollected(address indexed collector, uint256 fee);
 
@@ -202,7 +219,7 @@ contract GiftCard {
         return usdAmount.getEthAmountFromUsd(s_priceFeed);
     }
 
-    function getTotalFeesCollected() public view onlyOwner returns (uint256) {
+    function getTotalFeesCollected() external view onlyOwner returns (uint256) {
         return s_totalFeesCollected;
     }
 }
