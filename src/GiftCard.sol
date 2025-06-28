@@ -11,12 +11,13 @@ pragma solidity ^0.8.19;
 contract GiftCard {
     error GiftCardNotFound(uint256 cardId);
     error NotAuthorized(address caller);
-    error AlreadyClaimed(uint256 cardId);
+    error AlreadyClaimedOrRefunded(uint256 cardId);
     error InvalidPin(uint256 cardId);
     error IncorrectValue(uint256 expected, uint256 received);
     error CardLocked(uint256 unlockTimestamp);
     error InvalidReceiver(address receiver);
     error ZeroValueNotAllowed();
+    error CardNotExpired(uint256 expireAt);
 
     struct Card {
         uint256 cardId;
@@ -26,6 +27,7 @@ contract GiftCard {
         bytes32 pinHash;
         bool claimed;
         uint256 createdAt;
+        uint256 expireAt;
     }
 
     mapping(uint256 => Card) public giftCards;
@@ -49,7 +51,14 @@ contract GiftCard {
         nextCardId = 1;
     }
 
-    function createGiftCard() public payable {
+    modifier onlyCardCreator(uint256 _cardId) {
+        if (giftCards[_cardId].creator != msg.sender) {
+            revert NotAuthorized(msg.sender);
+        }
+        _;
+    }
+
+    function createGiftCard(uint256 _expireAt) public payable {
         if(msg.value == 0) revert ZeroValueNotAllowed();
         if(msg.sender == address(0)) revert NotAuthorized(msg.sender);
 
@@ -63,7 +72,8 @@ contract GiftCard {
             value: msg.value,
             pinHash: pinHash,
             claimed: false,
-            createdAt: block.timestamp
+            createdAt: block.timestamp,
+            expireAt: _expireAt
         });
 
         nextCardId++;
@@ -87,6 +97,7 @@ contract GiftCard {
      * @return value The Ether value of the card.
      * @return claimed True if the card has been claimed, false otherwise.
      * @return createdAt The timestamp when the card was created.
+     * @return expireAt The timestamp when the card expires.
     */
     function getGiftCardDetails(uint256 _cardId)
         public
@@ -97,7 +108,8 @@ contract GiftCard {
             address receiver,
             uint256 value,
             bool claimed,
-            uint256 createdAt
+            uint256 createdAt,
+            uint256 expireAt
         )
     {
         Card storage card = giftCards[_cardId];
@@ -110,7 +122,31 @@ contract GiftCard {
             card.receiver,
             card.value,
             card.claimed,
-            card.createdAt
+            card.createdAt,
+            card.expireAt
         );
+    }
+
+    function reclaimExpiredCard(uint256 _cardId) 
+        external 
+        onlyCardCreator(_cardId) 
+    {
+        Card storage card = giftCards[_cardId];
+
+        if (card.claimed) {
+            revert AlreadyClaimedOrRefunded(_cardId);
+        }
+        if (block.timestamp < card.expireAt) {
+            revert CardNotExpired(card.expireAt);
+        }
+        if (card.value == 0) {
+            revert AlreadyClaimedOrRefunded(_cardId);
+        }
+
+        uint256 amount = card.value;
+        card.value = 0;
+        card.claimed = true; // Mark as claimed to prevent double spending
+
+        payable(msg.sender).transfer(amount);
     }
 }
