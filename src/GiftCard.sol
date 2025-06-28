@@ -38,6 +38,10 @@ contract GiftCard {
     mapping(uint256 => Card) public giftCards;
     uint256 private nextCardId;
 
+    uint256 private s_totalFeesCollected; // Total fees collected from gift card transactions
+    uint256 private s_claimFeeBasisPoints; // e.g., 2 for 0.02%
+    address payable private s_feeCollector; // Address to send the fee to
+
     enum ClaimType { Token, Bank, Airtime, Data }
 
     event GiftCardCreated(
@@ -53,10 +57,20 @@ contract GiftCard {
         uint256 value,
         uint256 createdAt
     );
+    event FeeCollected(address indexed collector, uint256 fee);
 
     constructor(address priceFeed) {
         nextCardId = 1;
         s_priceFeed = AggregatorV3Interface(priceFeed);
+        s_feeCollector = payable(msg.sender);
+        s_claimFeeBasisPoints = 5;
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != s_feeCollector) {
+            revert NotAuthorized(msg.sender);
+        }
+        _;
     }
 
     modifier onlyCardCreator(uint256 _cardId) {
@@ -134,40 +148,46 @@ contract GiftCard {
         );
     }
 
-    function reclaimExpiredCard(uint256 _cardId) 
+    function reclaimExpiredCard(uint256 _cardId, string memory pin) 
         external 
         onlyCardCreator(_cardId) 
     {
         Card storage card = giftCards[_cardId];
 
-        if (card.claimed) {
-            revert AlreadyClaimedOrRefunded(_cardId);
-        }
-        if (block.timestamp < card.expireAt) {
-            revert CardNotExpired(card.expireAt);
-        }
-        if (card.value == 0) {
-            revert AlreadyClaimedOrRefunded(_cardId);
-        }
+        if(card.cardId == 0) revert GiftCardNotFound(_cardId);
+        if (card.claimed) revert AlreadyClaimedOrRefunded(_cardId);
+        //if(block.timestamp < card.createdAt) revert CardLocked(card.createdAt);
+        if (block.timestamp < card.expireAt) revert CardNotExpired(card.expireAt);
+        if (card.value == 0) revert AlreadyClaimedOrRefunded(_cardId);
 
-        uint256 amount = card.value;
-        card.value = 0;
-        card.receiver = payable(msg.sender);
+        // Check PIN
+        if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
+
+        // Calculate 0.05% fee (5 basis points)
+        uint256 fee = (card.value * s_claimFeeBasisPoints) / 10000;
+        uint256 payout = card.value - fee;
+
         card.claimed = true; // Mark as claimed to prevent double spending
+        card.receiver = payable(msg.sender);
+        card.value = 0;
 
         if (address(this).balance < 0) revert TransferFailed();
-        (
-            bool callSuccess,
-            //bytes memory dataReturned
-        ) = payable(msg.sender).call{value: amount}("");
-        if(!callSuccess) revert TransferFailed();
+        // Transfer payout to receiver
+        (bool sent, ) = payable(msg.sender).call{value: payout}("");
+        if (!sent) revert TransferFailed();
 
+        // Transfer fee to feeCollector
+        (bool feeSent, ) = s_feeCollector.call{value: fee}("");
+        if(!feeSent) revert TransferFailed();
+
+        s_totalFeesCollected += fee;
         emit GiftCardClaimed(
             _cardId,
             msg.sender,
-            amount,
+            payout,
             block.timestamp
         );
+        emit FeeCollected(s_feeCollector, fee);
     }
 
     function usdValue(uint256 ethAmount) 
@@ -180,5 +200,9 @@ contract GiftCard {
         public view returns (uint256) 
     {
         return usdAmount.getEthAmountFromUsd(s_priceFeed);
+    }
+
+    function getTotalFeesCollected() public view onlyOwner returns (uint256) {
+        return s_totalFeesCollected;
     }
 }
