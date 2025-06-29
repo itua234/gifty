@@ -4,7 +4,7 @@ pragma solidity ^0.8.19;
 import "forge-std/Test.sol";
 import {GiftCard} from "../src/GiftCard.sol";
 import { DeployGiftCard } from "../script/DeployGiftCard.s.sol";
-import "./mocks/MockV3Aggregator.sol";
+import { MockV3Aggregator } from "./mocks/MockV3Aggregator.sol";
 import { PriceConverter } from "../src/PriceConverter.sol";
 
 contract GiftCardTest is Test {
@@ -14,17 +14,16 @@ contract GiftCardTest is Test {
     address user = makeAddr("alice");
 
     function setUp() public {
-        // Mock ETH/USD price as $2000 * 1e8
         DeployGiftCard deployGiftCard = new DeployGiftCard();
         giftCard = deployGiftCard.run();
-        //mockFeed = new MockV3Aggregator(8, 2000 * 1e8); // 8 decimals, $2000 price
+        mockFeed = new MockV3Aggregator(8, 2000 * 1e8); // 8 decimals, $2000 price
     }
 
     function testCanCreateGiftCard() public {
         vm.deal(user, 1 ether);
         vm.prank(user);
 
-        giftCard.createGiftCard{value: 1 ether}(block.timestamp + 1 days);
+        giftCard.createGiftCard{value: 1 ether}(block.timestamp + 1 days, "1234");
 
         (
             uint256 cardId,
@@ -53,14 +52,14 @@ contract GiftCardTest is Test {
 
     function testReclaimAfterExpiry() public {
         vm.deal(user, 1 ether);
-        vm.prank(user);
-        giftCard.createGiftCard{value: 1 ether}(block.timestamp + 1);
+        vm.startPrank(user);
+            giftCard.createGiftCard{value: 1 ether}(block.timestamp + 1, "1234");
 
-        skip(2); // simulate time passing
-        vm.prank(user);
-        giftCard.reclaimExpiredCard(1);
+            skip(2); // simulate time passing
+            giftCard.reclaimExpiredCard(1, "1234");
 
-        (, , , uint256 value, bool claimed, , ) = giftCard.getGiftCardDetails(1);
+            (, , , uint256 value, bool claimed, , ) = giftCard.getGiftCardDetails(1);
+        vm.stopPrank();
 
         assertEq(value, 0);
         assertEq(claimed, true);

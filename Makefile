@@ -51,12 +51,12 @@ deploy-giftcard:
 	--broadcast -vvvv
 	@echo "GiftCard deployed."
 
-lisk-usdvalue:
+fetch-usdvalue:
 	@echo "Calling usdValue..."
 	cast call 0xae09ebCC43210d0cf8fF6a7495251FEACff86245 "usdValue(uint256)" 1000000000000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
 	@echo "usdValue called."
 
-lisk-ethvalue:
+fetch-ethvalue:
 	@echo "Calling ethValue..."
 	cast call 0xae09ebCC43210d0cf8fF6a7495251FEACff86245 "ethValue(uint256)" 2000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
 	@echo "ethValue called."

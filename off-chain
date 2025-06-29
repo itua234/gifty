@@ -113,3 +113,77 @@ Privacy: Phone numbers are sensitive. Ensure the off-chain service handles this 
 Scalability: For a high volume of claims, your off-chain service needs to be scalable.
 
 This hybrid approach is the standard way to bridge blockchain interactions with real-world services.
+
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "math/big"
+    "net/http"
+
+    "github.com/ethereum/go-ethereum/accounts/abi"
+    "github.com/ethereum/go-ethereum/common"
+    "github.com/ethereum/go-ethereum/core/types"
+    "github.com/ethereum/go-ethereum/ethclient"
+    "github.com/gin-gonic/gin"
+)
+
+var events []string // Store events in memory for demo
+
+func main() {
+    // Connect to Ethereum node
+    client, err := ethclient.Dial("https://eth-sepolia.g.alchemy.com/v2/your-api-key")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Contract address and ABI
+    contractAddress := common.HexToAddress("0xYourContractAddress")
+    parsedABI, err := abi.JSON(strings.NewReader(`[{"anonymous":false,"inputs":[{"indexed":true,"internalType":"uint256","name":"cardId","type":"uint256"},{"indexed":true,"internalType":"address","name":"claimer","type":"address"},{"indexed":false,"internalType":"string","name":"bankAccount","type":"string"},{"indexed":false,"internalType":"string","name":"bankCode","type":"string"},{"indexed":false,"internalType":"uint256","name":"usdAmount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"ethAmount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"timestamp","type":"uint256"}],"name":"BankClaimRequested","type":"event"}]`))
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Subscribe to events in a goroutine
+    go func() {
+        query := ethereum.FilterQuery{
+            Addresses: []common.Address{contractAddress},
+        }
+        logs := make(chan types.Log)
+        sub, err := client.SubscribeFilterLogs(context.Background(), query, logs)
+        if err != nil {
+            log.Fatal(err)
+        }
+        for {
+            select {
+            case err := <-sub.Err():
+                log.Println("Subscription error:", err)
+            case vLog := <-logs:
+                event := struct {
+                    CardId     *big.Int
+                    Claimer    common.Address
+                    BankAccount string
+                    BankCode    string
+                    UsdAmount   *big.Int
+                    EthAmount   *big.Int
+                    Timestamp   *big.Int
+                }{}
+                err := parsedABI.UnpackIntoInterface(&event, "BankClaimRequested", vLog.Data)
+                if err == nil {
+                    msg := fmt.Sprintf("BankClaimRequested: CardId=%s Claimer=%s BankAccount=%s", event.CardId, event.Claimer.Hex(), event.BankAccount)
+                    log.Println(msg)
+                    events = append(events, msg)
+                }
+            }
+        }
+    }()
+
+    // Set up gin server
+    r := gin.Default()
+    r.GET("/events", func(c *gin.Context) {
+        c.JSON(http.StatusOK, events)
+    })
+    r.Run(":8080")
+}

@@ -172,9 +172,9 @@ contract GiftCard {
     {
         Card storage card = giftCards[_cardId];
 
+        if (block.timestamp < card.expireAt) revert CardNotExpired(card.expireAt);
         if(card.cardId == 0) revert GiftCardNotFound(_cardId);
         if (card.claimed) revert AlreadyClaimedOrRefunded(_cardId);
-        if (block.timestamp < card.expireAt) revert CardNotExpired(card.expireAt);
         if (card.value == 0) revert AlreadyClaimedOrRefunded(_cardId);
 
         if(card.pinHash != keccak256(abi.encodePacked(pin))) revert InvalidPin(_cardId);
