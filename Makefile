@@ -53,10 +53,19 @@ deploy-giftcard:
 
 fetch-usdvalue:
 	@echo "Calling usdValue..."
-	cast call 0xae09ebCC43210d0cf8fF6a7495251FEACff86245 "usdValue(uint256)" 1000000000000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
+	cast call 0x0A5e03644DFC4212eDE33D0f6bD4f46822B419f0 "usdValue(uint256)" 1000000000000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
 	@echo "usdValue called."
 
 fetch-ethvalue:
 	@echo "Calling ethValue..."
-	cast call 0xae09ebCC43210d0cf8fF6a7495251FEACff86245 "ethValue(uint256)" 2000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
+	cast call 0x0A5e03644DFC4212eDE33D0f6bD4f46822B419f0 "ethValue(uint256)" 2000000 --rpc-url $(SEPOLIA_RPC_URL) --private-key $(SEPOLIA_PRIVATE_KEY) -vvvv
 	@echo "ethValue called."
+
+create-giftcard:
+	@echo "Creating GiftCard..."
+	cast send 0x0A5e03644DFC4212eDE33D0f6bD4f46822B419f0 \
+	--value 100000000000000 \
+  	"createGiftCard(uint256,string)" 1728000000 "1234" \
+  	--rpc-url $(SEPOLIA_RPC_URL) \
+  --private-key $(SEPOLIA_PRIVATE_KEY)
+	@echo "GiftCard created."
