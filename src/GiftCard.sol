@@ -38,12 +38,14 @@ contract GiftCard {
     AggregatorV3Interface private s_priceFeed;
     mapping(uint256 => Card) public giftCards;
     uint256 private nextCardId;
+    bool private locked; // Prevents re-entrancy attacks
 
     uint256 private s_totalFeesCollected; // Total fees collected from gift card transactions
     uint256 private s_claimFee; // e.g., 2 for 0.02%
     address payable private s_feeCollector; // Address to send the fee to
 
     enum ClaimType { Token, Bank, Airtime, Data }
+    enum GiftCardStatus { Active, Claimed, Expired }
 
     event GiftCardCreated(
         uint256 indexed cardId,
@@ -98,6 +100,14 @@ contract GiftCard {
         _;
     }
 
+    modifier noReentrant() {
+        require(!locked, "ReentrancyGuard: reentrant call");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+    //createGift(value, recipientHash, expirationTime, messageHash)
     function createGiftCard(uint256 _expireAt, string memory pin) public payable {
         if(msg.value == 0) revert ZeroValueNotAllowed();
         if(msg.sender == address(0)) revert NotAuthorized(msg.sender);
@@ -300,15 +310,11 @@ contract GiftCard {
         emit FeeCollected(s_feeCollector, fee);
     }
 
-    function usdValue(uint256 ethAmount) 
-        public view returns (uint256)
-    {
+    function usdValue(uint256 ethAmount) public view returns (uint256) {
         return ethAmount.getUsdAmountFromEth(s_priceFeed);
     }
 
-    function ethValue(uint256 usdAmount) 
-        public view returns (uint256) 
-    {
+    function ethValue(uint256 usdAmount) public view returns (uint256) {
         return usdAmount.getEthAmountFromUsd(s_priceFeed);
     }
 
@@ -316,9 +322,15 @@ contract GiftCard {
         return s_totalFeesCollected;
     }
 
-    function setFixedFee(
-        uint256 _newFee
-    ) private onlyOwner {
+    function getGiftStatus(uint256 _cardId ) public view returns (GiftCardStatus) {
+        Card storage card = giftCards[_cardId];
+        if(card.cardId == 0) revert GiftCardNotFound(_cardId);
+        if(card.claimed) return GiftCardStatus.Claimed;
+        if(block.timestamp > card.expireAt) return GiftCardStatus.Expired;
+        return GiftCardStatus.Active;
+    }
+
+    function setFixedFee(uint256 _newFee) private onlyOwner {
         s_claimFee = _newFee;
     }
 }
